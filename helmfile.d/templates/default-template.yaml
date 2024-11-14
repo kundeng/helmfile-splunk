@@ -1,0 +1,13 @@
+templates:
+  default:
+    namespace: kube-system
+    chart: stable/{{`{{.Release.Name}}`}}
+    values:
+      - releases/{{`{{.Release.Name}}`}}/values.yaml               # Base values for each release
+      - releases/{{`{{.Release.Name}}`}}/{{`{{.Environment.Name}}`}}-values.yaml  # Environment-specific values
+    secrets:
+      - releases/{{`{{.Release.Name}}`}}/secrets.yaml              # Base secrets for each release
+      - releases/{{`{{.Release.Name}}`}}/{{`{{.Environment.Name}}`}}-secrets.yaml  # Environment-specific secrets
+    labels:
+      environment: "{{`{{.Environment.Name}}`}}"
+    missingFileHandler: Warn

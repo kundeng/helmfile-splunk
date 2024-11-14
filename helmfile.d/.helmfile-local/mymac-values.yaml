@@ -1,0 +1,11 @@
+global:
+  replicaCount: 1                               # Minimize replicas for local testing
+  # image:
+  #   repository: "localhost:5000/myapp"          # Use a local image registry
+  #   tag: "dev-latest"                           # Use a tag specific to local development
+  logging:
+    level: debug                                # Set detailed logging for development
+  featureFlags:
+    enableExperimentalFeatures: true            # Enable experimental flags locally
+
+

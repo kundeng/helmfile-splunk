@@ -1,0 +1,9 @@
+
+
+installCRDs: true
+
+splunkOperator:
+  clusterWideAccess: false  # Set to false to revoke cluster-wide access
+
+  persistentVolumeClaim:
+    storageClassName: ""    # Set to empty string to use default storage class

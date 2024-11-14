@@ -1,0 +1,60 @@
+helmDefaults:
+  cleanupOnFail: true
+  verify: false
+  wait: false                      # Ensure deployments complete before moving on
+  waitForJobs: true               # Wait for any jobs associated with the release
+  timeout: 600                    # Increase timeout for complex deployments
+  recreatePods: false
+  force: true
+  historyMax: 10
+  createNamespace: true
+  devel: false
+  reuseValues: false
+  skipDeps: false
+  cascade: background
+  insecureSkipTLSVerify: false
+
+bases:
+  - repos.yaml                       # Load shared repositories
+  - templates/default-template.yaml  # Load shared template with values and secrets
+  - .helmfile-local/helmfile.yaml    # Load personal configurations dynamically
+
+missingFileHandler: Warn          # Suppresses warnings if `.helmfile-local/` is missing
+
+environments:
+  # prod:
+  #   values:
+  #     - environments/global-env-defaults.yaml  # Global defaults
+  #     - environments/prod-values.yaml          # Production-specific overrides
+
+  # staging:
+  #   values:
+  #     - environments/global-env-defaults.yaml  # Global defaults
+  #     - environments/staging-values.yaml       # Staging-specific overrides
+
+  dev:
+    values:
+      - environments/global-env-defaults.yaml  # Global defaults
+      - environments/dev-values.yaml           # Development-specific overrides
+
+---
+releases:
+
+  - name: splunk-operator-{{.Environment.Name}}
+    namespace: "{{.StateValues.SPLUNK_OPERATOR_NAMESPACE}}"
+    chart: splunk/splunk-operator
+    version: "{{.StateValues.SPLUNK_OPERATOR_VERSION}}"
+    inherit:
+      - template: default
+
+
+  - name: splunk-standalone-{{.Environment.Name}}
+    namespace: "{{.StateValues.SPLUNK_NAMESPACE}}"
+    chart: splunk/splunk-enterprise
+    inherit:
+      - template: default
+
+
+
+
+  

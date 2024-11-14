@@ -1,0 +1,13 @@
+global:
+  replicaCount: 1                   # Default replicas for small deployments
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  labels:
+    managed-by: helmfile            # Common label for all resources
+  logging:
+    level: info                     # Default logging level for applications

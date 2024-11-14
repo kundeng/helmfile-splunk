@@ -1,0 +1,8 @@
+environments:
+  mymac:
+    values:
+      - environments/dev-values.yaml           # Base dev environment values
+      - .helmfile-local/mymac-values.yaml    # Employee-specific overrides
+
+    kubeContext: "devs"
+    

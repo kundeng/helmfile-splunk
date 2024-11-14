@@ -1,0 +1,5 @@
+  repositories:
+    - name: splunk
+      url: https://splunk.github.io/splunk-operator/
+    - name: stable
+      url: https://charts.helm.sh/stable

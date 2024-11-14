@@ -1,0 +1,9 @@
+SPLUNK_OPERATOR_NAMESPACE: splunk-operator
+SPLUNK_OPERATOR_VERSION: 2.6.1
+
+# this is the namespace where the splunk operator will create the splunk enterprise instances,
+# if it's different from splunk-operator, we need to patch the splunk-operator to watch the splunk-operator namespace
+SPLUNK_NAMESPACE: splunk-operator  
+
+
+
