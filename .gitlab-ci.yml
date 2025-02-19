@@ -28,7 +28,7 @@ before_script:
       && ls -lah /usr/local/bin/helmfile
     fi
  
-
+ 
 
 helm_template:
   stage: helm-template
@@ -100,8 +100,28 @@ push_manifests:
     # Configure Git with CI bot credentials.
     git config --global user.email "${CI_COMMIT_AUTHOR_EMAIL:-ci-bot@example.com}"
     git config --global user.name "${CI_PUSH_USERNAME:-ci-bot}"
+
+    RELEASE_DIR="$CI_PROJECT_DIR/release_repo"
+    rm -rf "$RELEASE_DIR"
     
-    # Check for the existence and non-empty state of generated directories.
+    # Clone the repository (shallow clone).
+    git clone --depth=1 https://git:${GITLAB_ACCESS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git "$RELEASE_DIR"
+    cd "$RELEASE_DIR"
+    
+    if git ls-remote --heads origin ${RELEASE_BRANCH} | grep -q "refs/heads/${RELEASE_BRANCH}"; then
+      # Remote branch exists; fetch it and then check it out.
+      git fetch origin ${RELEASE_BRANCH}
+      git checkout -B ${RELEASE_BRANCH} FETCH_HEAD
+    else
+      echo "Creating orphan branch ${RELEASE_BRANCH}"
+      git checkout --orphan ${RELEASE_BRANCH}
+      git rm -rf .
+      git commit --allow-empty -m "Initial commit on orphan branch ${RELEASE_BRANCH}"
+    fi
+
+
+
+    # Validate that generated directories exist and are non-empty.
     if [ ! -d "${TEMP_DIR}/${MANIFESTS_DIR}" ] || [ -z "$(find ${TEMP_DIR}/${MANIFESTS_DIR} -type f -size +0c)" ]; then
       echo "ERROR: Generated manifests directory is missing or empty. Aborting push." >&2
       exit 1
@@ -111,41 +131,25 @@ push_manifests:
       exit 1
     fi
 
-    # Create or update the local branch 'manifests'
-    git checkout -B ${RELEASE_BRANCH}
-
-    # Tag current state as backup before overwriting.
-    current_commit=$(git rev-parse HEAD)
-    git tag -f "backup-$(date +%Y%m%d-%H%M%S)" $current_commit
-
-    # Check if the remote 'manifests' branch exists and pull it if it does.
-    if git ls-remote --exit-code origin manifests; then
-      git pull origin ${RELEASE_BRANCH}
-    else
-      echo "No existing remote branch 'manifests', creating a new one."
-    fi
-
-    # Backup current manifests in working directory if needed.
-    # (Optional: you could create a backup folder or archive them)
-
-    # Remove monitored directories.
-    rm -rf ${MANIFESTS_DIR} ${ARGO_APPS_DIR}
-
-    # Copy the newly generated files.
+    # Copy generated artifacts from the TEMP_DIR into this clean clone.
     cp -r ${TEMP_DIR}/${MANIFESTS_DIR} .
     cp -r ${TEMP_DIR}/${ARGO_APPS_DIR} .
 
     # Stage and commit changes.
     git add ${MANIFESTS_DIR} ${ARGO_APPS_DIR}
-    git commit -m "Update Helm manifests & ArgoCD applications for ArgoCD" || {
+    git commit -m "Update release artifacts for Helm manifests & ArgoCD applications" || {
       echo "No changes detected, nothing to commit."
       exit 0
     }
 
-    # Push the changes using the CI bot credentials.
-    #git push https://${CI_PUSH_USERNAME}:${CI_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git ${RELEASE_BRANCH}
-    git push https://git:${GITLAB_ACCESS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git manifests
+    # After successful commit, add a tag.
+    NEW_TAG="release-$(date +%Y%m%d-%H%M%S)"
+    git tag ${NEW_TAG}
 
+    # Push the commit and the new tag.
+    git push https://git:${GITLAB_ACCESS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git ${RELEASE_BRANCH}
+    git push https://git:${GITLAB_ACCESS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git --tags
   only:
     - main
+
 
