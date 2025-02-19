@@ -1,0 +1,151 @@
+stages:
+  - helm-template
+  - generate-argocd-apps
+  - push-manifests
+
+default:
+  tags:
+    - shared 
+  image: "registry.gitlab.com/gitlab-org/cluster-integration/cluster-applications:v1.9.1"
+    
+variables:
+  REPO_URL: "https://git.umms.med.umich.edu/empf/cdis/splunk/splunk-helm/"
+  MANIFESTS_DIR: "helm-manifests"
+  ARGO_APPS_DIR: "argo-apps"
+  TEMP_DIR: "$CI_PROJECT_DIR/tmp/generated"   # Temporary directory for generated files
+  HELMFILE_VERSION: 0.168.0
+  RELEASE_BRANCH: manifests
+
+
+before_script:
+  - |-
+    if [[ ! -z $HELMFILE_VERSION ]]; then
+      export TARGETARCH=amd64 \
+      && wget https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_linux_${TARGETARCH}.tar.gz \
+      && tar xf helmfile_${HELMFILE_VERSION}_linux_${TARGETARCH}.tar.gz \
+      && mv helmfile /usr/local/bin/helmfile \
+      && chmod u+x /usr/local/bin/helmfile \
+      && ls -lah /usr/local/bin/helmfile
+    fi
+ 
+
+
+helm_template:
+  stage: helm-template
+  script: |
+    mkdir -p ${TEMP_DIR}/${MANIFESTS_DIR}
+    cd $CI_PROJECT_DIR/helmfile.d
+    for env in dev staging prod; do
+      mkdir -p ${TEMP_DIR}/${MANIFESTS_DIR}/${env}
+      while read release; do
+        echo "Processing release $release for environment $env"
+        if helmfile -e $env template --selector name=$release > ${TEMP_DIR}/${MANIFESTS_DIR}/${env}/${release}.yaml; then
+          echo "Successfully templated $release for $env"
+        else
+          echo "Release $release not available for env $env. Skipping."
+        fi
+      done < <( (helmfile -e $env list 2>/dev/null  || true) | awk 'NR>1 {print $1}')
+    done
+  artifacts:
+    paths:
+      - ${TEMP_DIR}/${MANIFESTS_DIR}
+    expire_in: 1 hour
+
+
+
+
+generate_argocd_apps:
+  stage: generate-argocd-apps
+  script: |
+    mkdir -p ${TEMP_DIR}/${ARGO_APPS_DIR}
+    for env in dev staging prod; do
+      mkdir -p ${TEMP_DIR}/${ARGO_APPS_DIR}/${env}
+      while read release; do
+        manifest_file="${TEMP_DIR}/${MANIFESTS_DIR}/${env}/${release}.yaml"
+        if [ -f "$manifest_file" ]; then
+          echo "Generating ArgoCD app for release: $release in env: $env"
+          cat <<EOF > ${TEMP_DIR}/${ARGO_APPS_DIR}/${env}/${release}-app.yaml
+    apiVersion: argoproj.io/v1alpha1
+    kind: Application
+    metadata:
+      name: ${release}
+      namespace: argocd
+    spec:
+      project: default
+      source:
+        repoURL: '${CI_REPOSITORY_URL}'
+        targetRevision: ${RELEASE_BRANCH}
+        path: ${MANIFESTS_DIR}/${env}/${release}.yaml
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: ${env}-namespace
+    syncPolicy:
+      automated:
+        prune: true
+        selfHeal: true
+    EOF
+        else 
+          echo "Manifest for release ${release} in environment ${env} does not exist. Skipping ArgoCD app generation." >&2
+        fi          
+      done < <((helmfile -e $env list || true) | awk 'NR>1 {print $1}')
+    done
+  artifacts:
+    paths:
+      - ${TEMP_DIR}/${ARGO_APPS_DIR}
+    expire_in: 1 hour
+
+push_manifests:
+  stage: push-manifests
+  script: |
+    # Configure Git with CI bot credentials.
+    git config --global user.email "${CI_COMMIT_AUTHOR_EMAIL:-ci-bot@example.com}"
+    git config --global user.name "${CI_PUSH_USERNAME:-ci-bot}"
+    
+    # Check for the existence and non-empty state of generated directories.
+    if [ ! -d "${TEMP_DIR}/${MANIFESTS_DIR}" ] || [ -z "$(find ${TEMP_DIR}/${MANIFESTS_DIR} -type f -size +0c)" ]; then
+      echo "ERROR: Generated manifests directory is missing or empty. Aborting push." >&2
+      exit 1
+    fi
+    if [ ! -d "${TEMP_DIR}/${ARGO_APPS_DIR}" ] || [ -z "$(find ${TEMP_DIR}/${ARGO_APPS_DIR} -type f -size +0c)" ]; then
+      echo "ERROR: Generated ArgoCD apps directory is missing or empty. Aborting push." >&2
+      exit 1
+    fi
+
+    # Create or update the local branch 'manifests'
+    git checkout -B ${RELEASE_BRANCH}
+
+    # Tag current state as backup before overwriting.
+    current_commit=$(git rev-parse HEAD)
+    git tag -f "backup-$(date +%Y%m%d-%H%M%S)" $current_commit
+
+    # Check if the remote 'manifests' branch exists and pull it if it does.
+    if git ls-remote --exit-code origin manifests; then
+      git pull origin ${RELEASE_BRANCH}
+    else
+      echo "No existing remote branch 'manifests', creating a new one."
+    fi
+
+    # Backup current manifests in working directory if needed.
+    # (Optional: you could create a backup folder or archive them)
+
+    # Remove monitored directories.
+    rm -rf ${MANIFESTS_DIR} ${ARGO_APPS_DIR}
+
+    # Copy the newly generated files.
+    cp -r ${TEMP_DIR}/${MANIFESTS_DIR} .
+    cp -r ${TEMP_DIR}/${ARGO_APPS_DIR} .
+
+    # Stage and commit changes.
+    git add ${MANIFESTS_DIR} ${ARGO_APPS_DIR}
+    git commit -m "Update Helm manifests & ArgoCD applications for ArgoCD" || {
+      echo "No changes detected, nothing to commit."
+      exit 0
+    }
+
+    # Push the changes using the CI bot credentials.
+    #git push https://${CI_PUSH_USERNAME}:${CI_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git ${RELEASE_BRANCH}
+    git push https://git:${GITLAB_ACCESS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git manifests
+
+  only:
+    - main
+
